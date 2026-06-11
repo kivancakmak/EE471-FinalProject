@@ -1,0 +1,96 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kalori_takip/models/enums.dart';
+import 'package:kalori_takip/models/food.dart';
+import 'package:kalori_takip/models/food_entry.dart';
+
+FoodEntry _entry({
+  required double caloriesPer100,
+  double? servingGrams,
+  required double quantity,
+  required ServingUnit unit,
+}) {
+  return FoodEntry(
+    foodName: 'Test',
+    caloriesPer100: caloriesPer100,
+    servingGrams: servingGrams,
+    quantity: quantity,
+    unit: unit,
+    mealType: MealType.lunch,
+    date: '2026-06-10',
+    source: FoodSource.manual,
+    createdAt: DateTime(2026, 6, 10),
+  );
+}
+
+void main() {
+  group('Kalori hesaplama', () {
+    test('gram birimi doğrudan ölçeklenir', () {
+      final e = _entry(
+          caloriesPer100: 100, quantity: 250, unit: ServingUnit.gram);
+      expect(e.calories, 250);
+    });
+
+    test('ml birimi gram gibi ölçeklenir', () {
+      final e = _entry(
+          caloriesPer100: 40, quantity: 200, unit: ServingUnit.milliliter);
+      expect(e.calories, 80);
+    });
+
+    test('porsiyon birimi serving_grams ile çarpılır', () {
+      final e = _entry(
+          caloriesPer100: 150,
+          servingGrams: 50,
+          quantity: 2,
+          unit: ServingUnit.portion);
+      // 2 porsiyon * 50 g = 100 g -> 150 kcal
+      expect(e.calories, 150);
+    });
+
+    test('serving_grams yoksa porsiyon 100 g varsayılır', () {
+      final e = _entry(
+          caloriesPer100: 90, quantity: 1, unit: ServingUnit.portion);
+      expect(e.calories, 90);
+    });
+
+    test('makrolar da miktara göre ölçeklenir', () {
+      final food = Food(
+        name: 'Tavuk',
+        caloriesPer100: 165,
+        proteinPer100: 31,
+        servingGrams: 100,
+      );
+      final e = FoodEntry.fromFood(
+        food: food,
+        quantity: 200,
+        unit: ServingUnit.gram,
+        mealType: MealType.dinner,
+        date: '2026-06-10',
+      );
+      expect(e.calories, 330);
+      expect(e.protein, 62);
+    });
+  });
+
+  group('Open Food Facts ayrıştırma', () {
+    test('kalorisi olmayan ürün elenir', () {
+      final food = Food.fromOffProduct({
+        'product_name': 'Su',
+        'nutriments': {'proteins_100g': 0},
+      });
+      expect(food, isNull);
+    });
+
+    test('geçerli ürün modele çevrilir', () {
+      final food = Food.fromOffProduct({
+        'product_name': 'Muz',
+        'nutriments': {'energy-kcal_100g': 89, 'carbohydrates_100g': 23},
+        'serving_quantity': 120,
+        'code': '123',
+      });
+      expect(food, isNotNull);
+      expect(food!.caloriesPer100, 89);
+      expect(food.servingGrams, 120);
+      expect(food.source, FoodSource.off);
+    });
+  });
+}
