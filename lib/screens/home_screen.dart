@@ -11,6 +11,7 @@ import '../widgets/app_header.dart';
 import '../widgets/calorie_ring.dart';
 import '../widgets/macro_card.dart';
 import '../widgets/meal_section.dart';
+import 'nutrition_coach_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -36,36 +37,98 @@ class HomeScreen extends StatelessWidget {
               _CalorieCard(eaten: eaten, goal: settings.calorieGoal),
               const SizedBox(height: 14),
               _MacroRow(summary: summary, settings: settings),
+              const SizedBox(height: 14),
+              const _CoachBanner(),
               const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text("Bugünkü Öğünler",
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold)),
+                child: Text(
+                  "Bugünkü Öğünler",
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
               ),
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
                   children: MealType.values
-                      .map((meal) => MealSection(
-                            meal: meal,
-                            summary: summary,
-                            onAdd: () => context.read<NavProvider>().go(2),
-                            onDelete: (entry) async {
-                              await diary.deleteEntry(entry);
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                      content:
-                                          Text('${entry.foodName} silindi')),
-                                );
-                              }
-                            },
-                          ))
+                      .map(
+                        (meal) => MealSection(
+                          meal: meal,
+                          summary: summary,
+                          onAdd: () => context.read<NavProvider>().go(2),
+                          onDelete: (entry) async {
+                            await diary.deleteEntry(entry);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('${entry.foodName} silindi'),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      )
                       .toList(),
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CoachBanner extends StatelessWidget {
+  const _CoachBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const NutritionCoachScreen()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [scheme.primary, scheme.secondary],
+            ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.auto_awesome, color: Colors.white, size: 30),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '7 Günlük Beslenme Planın',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Hedeflerini, alışveriş listesini ve ilerlemeni gör',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.white),
             ],
           ),
         ),
@@ -95,14 +158,23 @@ class _CalorieCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _stat(context, Icons.local_fire_department_outlined,
-                      '$goal Hedef', muted),
+                  _stat(
+                    context,
+                    Icons.local_fire_department_outlined,
+                    '$goal Hedef',
+                    muted,
+                  ),
                   Container(
-                      width: 1,
-                      height: 20,
-                      color: muted?.withValues(alpha: 0.2)),
-                  _stat(context, Icons.restaurant_outlined,
-                      '${eaten.round()} Yenen', muted),
+                    width: 1,
+                    height: 20,
+                    color: muted?.withValues(alpha: 0.2),
+                  ),
+                  _stat(
+                    context,
+                    Icons.restaurant_outlined,
+                    '${eaten.round()} Yenen',
+                    muted,
+                  ),
                 ],
               ),
             ],
@@ -112,16 +184,16 @@ class _CalorieCard extends StatelessWidget {
     );
   }
 
-  Widget _stat(
-      BuildContext context, IconData icon, String text, Color? muted) {
+  Widget _stat(BuildContext context, IconData icon, String text, Color? muted) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 18, color: muted),
         const SizedBox(width: 6),
-        Text(text,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600)),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
       ],
     );
   }
@@ -141,23 +213,26 @@ class _MacroRow extends StatelessWidget {
         children: [
           Expanded(
             child: MacroCard(
-                label: 'Protein',
-                consumed: summary.totalProtein,
-                goal: settings.proteinGoal),
+              label: 'Protein',
+              consumed: summary.totalProtein,
+              goal: settings.proteinGoal,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: MacroCard(
-                label: 'Karb.',
-                consumed: summary.totalCarb,
-                goal: settings.carbGoal),
+              label: 'Karb.',
+              consumed: summary.totalCarb,
+              goal: settings.carbGoal,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: MacroCard(
-                label: 'Yağ',
-                consumed: summary.totalFat,
-                goal: settings.fatGoal),
+              label: 'Yağ',
+              consumed: summary.totalFat,
+              goal: settings.fatGoal,
+            ),
           ),
         ],
       ),
@@ -185,8 +260,7 @@ class _DateBanner extends StatelessWidget {
           children: [
             Icon(Icons.event, size: 18, color: scheme.secondary),
             const SizedBox(width: 8),
-            Expanded(
-                child: Text(DateHelpers.displayOfKey(diary.selectedDate))),
+            Expanded(child: Text(DateHelpers.displayOfKey(diary.selectedDate))),
             TextButton(
               onPressed: () => diary.loadDate(DateHelpers.today()),
               child: const Text('Bugüne dön'),

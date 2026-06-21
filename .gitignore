@@ -46,3 +46,9 @@ app.*.map.json
 
 # Secrets — do not commit the real Gemini API key
 .env
+backend/.env
+backend/**/.env
+backend/.venv/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/*.log

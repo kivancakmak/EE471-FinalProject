@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/settings_provider.dart';
 import '../widgets/app_header.dart';
+import 'nutrition_coach_screen.dart';
 
 /// Ayarlar: profil, hedefler, uygulama ayarları, yapay zeka, hesap, destek.
 class SettingsScreen extends StatelessWidget {
@@ -25,6 +26,18 @@ class SettingsScreen extends StatelessWidget {
             _profileCard(context, settings),
             _label('HEDEFLER'),
             _group(context, [
+              _Tile(
+                icon: Icons.auto_awesome_outlined,
+                title: 'Beslenme Koçu',
+                value: settings.nutritionGoal.label,
+                valueColor: scheme.secondary,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NutritionCoachScreen(),
+                  ),
+                ),
+              ),
               _Tile(
                 icon: Icons.monitor_weight_outlined,
                 title: 'Kilo Hedefi',
@@ -64,7 +77,8 @@ class SettingsScreen extends StatelessWidget {
                 trailing: Switch(
                   value: isDark,
                   onChanged: (v) => settings.setThemeMode(
-                      v ? ThemeMode.dark : ThemeMode.light),
+                    v ? ThemeMode.dark : ThemeMode.light,
+                  ),
                 ),
               ),
               _Tile(
@@ -76,6 +90,12 @@ class SettingsScreen extends StatelessWidget {
             ]),
             _label('YAPAY ZEKA'),
             _group(context, [
+              _Tile(
+                icon: Icons.cloud_outlined,
+                title: 'Beslenme AI Backend',
+                value: settings.coachBackendUrl,
+                onTap: () => _editBackendUrl(context, settings),
+              ),
               _Tile(
                 icon: Icons.smart_toy_outlined,
                 title: 'Gemini API Anahtarı',
@@ -115,17 +135,22 @@ class SettingsScreen extends StatelessWidget {
             Center(
               child: TextButton(
                 onPressed: () => _soon(context),
-                child: Text('Çıkış Yap',
-                    style: TextStyle(
-                        color: scheme.error,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16)),
+                child: Text(
+                  'Çıkış Yap',
+                  style: TextStyle(
+                    color: scheme.error,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 8),
             Center(
-              child: Text('NutriTrack • EE471 Final Projesi',
-                  style: Theme.of(context).textTheme.bodySmall),
+              child: Text(
+                'NutriTrack • EE471 Final Projesi',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ),
           ],
         ),
@@ -145,26 +170,32 @@ class SettingsScreen extends StatelessWidget {
               CircleAvatar(
                 radius: 28,
                 backgroundColor: scheme.secondary.withValues(alpha: 0.2),
-                child: Icon(Icons.person,
-                    size: 32, color: scheme.secondary),
+                child: Icon(Icons.person, size: 32, color: scheme.secondary),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(settings.userName,
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      settings.userName,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     const SizedBox(height: 2),
                     GestureDetector(
                       onTap: () => _editName(context, settings),
-                      child: Text('Profili Düzenle',
-                          style: TextStyle(
-                              color: scheme.secondary,
-                              fontWeight: FontWeight.w500)),
+                      child: Text(
+                        'Profili Düzenle',
+                        style: TextStyle(
+                          color: scheme.secondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -184,23 +215,29 @@ class SettingsScreen extends StatelessWidget {
         color: scheme.secondary,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text('PRO',
-          style: TextStyle(
-              color: scheme.onSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.bold)),
+      child: Text(
+        'PRO',
+        style: TextStyle(
+          color: scheme.onSecondary,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 
   Widget _label(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-        child: Text(text,
-            style: const TextStyle(
-                fontSize: 12,
-                letterSpacing: 0.6,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF8A958E))),
-      );
+    padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 12,
+        letterSpacing: 0.6,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF8A958E),
+      ),
+    ),
+  );
 
   Widget _group(BuildContext context, List<Widget> tiles) {
     final children = <Widget>[];
@@ -241,11 +278,13 @@ class SettingsScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('İptal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('İptal'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Kaydet')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Kaydet'),
+          ),
         ],
       ),
     );
@@ -256,7 +295,9 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _editName(
-      BuildContext context, SettingsProvider settings) async {
+    BuildContext context,
+    SettingsProvider settings,
+  ) async {
     final c = TextEditingController(text: settings.userName);
     final ok = await showDialog<bool>(
       context: context,
@@ -265,11 +306,13 @@ class SettingsScreen extends StatelessWidget {
         content: TextField(controller: c, autofocus: true),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('İptal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('İptal'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Kaydet')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Kaydet'),
+          ),
         ],
       ),
     );
@@ -277,7 +320,9 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _editApiKey(
-      BuildContext context, SettingsProvider settings) async {
+    BuildContext context,
+    SettingsProvider settings,
+  ) async {
     final c = TextEditingController(text: settings.geminiApiKey);
     var obscure = true;
     final ok = await showDialog<bool>(
@@ -289,8 +334,9 @@ class SettingsScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                  'Fotoğraftan kalori için Google AI Studio\'dan ücretsiz alınır.',
-                  style: TextStyle(fontSize: 13)),
+                'Fotoğraftan kalori için Google AI Studio\'dan ücretsiz alınır.',
+                style: TextStyle(fontSize: 13),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: c,
@@ -298,9 +344,9 @@ class SettingsScreen extends StatelessWidget {
                 decoration: InputDecoration(
                   labelText: 'Anahtar',
                   suffixIcon: IconButton(
-                    icon: Icon(obscure
-                        ? Icons.visibility
-                        : Icons.visibility_off),
+                    icon: Icon(
+                      obscure ? Icons.visibility : Icons.visibility_off,
+                    ),
                     onPressed: () => setState(() => obscure = !obscure),
                   ),
                 ),
@@ -309,16 +355,62 @@ class SettingsScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('İptal')),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('İptal'),
+            ),
             FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Kaydet')),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Kaydet'),
+            ),
           ],
         ),
       ),
     );
     if (ok == true) await settings.setGeminiApiKey(c.text);
+  }
+
+  Future<void> _editBackendUrl(
+    BuildContext context,
+    SettingsProvider settings,
+  ) async {
+    final controller = TextEditingController(text: settings.coachBackendUrl);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Beslenme AI Backend'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Android emülatörü için http://10.0.2.2:8000 kullan. '
+              'Gerçek telefonda bilgisayarının yerel IP adresini yaz.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Backend URL',
+                hintText: 'http://10.0.2.2:8000',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('İptal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Kaydet'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await settings.setCoachBackendUrl(controller.text);
   }
 }
 
@@ -352,16 +444,22 @@ class _Tile extends StatelessWidget {
             Icon(icon, size: 22, color: scheme.onSurface),
             const SizedBox(width: 14),
             Expanded(
-                child: Text(title,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w500))),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
             if (trailing != null)
               trailing!
             else ...[
               if (value != null)
-                Text(value!,
-                    style: TextStyle(
-                        color: valueColor ?? muted, fontSize: 14)),
+                Text(
+                  value!,
+                  style: TextStyle(color: valueColor ?? muted, fontSize: 14),
+                ),
               if (onTap != null) ...[
                 const SizedBox(width: 6),
                 Icon(Icons.chevron_right, color: muted, size: 20),

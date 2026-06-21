@@ -36,6 +36,31 @@ Bir Android cihaz bağlayın veya emülatör başlatın, sonra:
 flutter run
 ```
 
+## AI Beslenme Koçu Backend
+
+Beslenme Koçu internetsiz yerel planla çalışır. Daha çeşitli planlar üretmek
+için ücretsiz Groq kotasını kullanan backend isteğe bağlı olarak çalıştırılabilir.
+Groq API anahtarı mobil uygulamaya değil yalnızca backend `.env` dosyasına yazılır.
+
+```powershell
+cd backend
+py -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+https://console.groq.com/keys adresinden ücretsiz anahtar oluşturup
+`backend/.env` içindeki `GROQ_API_KEY` değerini değiştirin. Ardından:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Android emülatöründe varsayılan backend adresi `http://10.0.2.2:8000`'dir.
+Gerçek telefonda telefon ve bilgisayar aynı Wi-Fi ağında olmalı; uygulamadaki
+**Ayarlar > Beslenme AI Backend** alanına bilgisayarın yerel IP adresi
+(`http://192.168.x.x:8000` gibi) girilmelidir.
+
 > Not: Kamera özelliğini test etmek için gerçek cihaz önerilir.
 
 ## Testler
@@ -43,6 +68,44 @@ flutter run
 ```bash
 flutter test
 ```
+
+## CI, Lint, Test ve Versiyonlama
+
+Bu proje GitHub Actions ile `main` branch'e push yapıldığında ve pull request açıldığında otomatik olarak lint ve test çalıştırır. CI pipeline'ı Flutter stable kurar, bağımlılıkları `flutter pub get` ile yükler, sonra aşağıdaki komutları çalıştırır.
+
+Lint:
+
+```bash
+flutter analyze
+```
+
+Test:
+
+```bash
+flutter test
+```
+
+Versiyon `pubspec.yaml` içindeki `version` alanında Semantic Versioning formatında tutulur. Güncel versiyon `1.1.0+2` değeridir; `+2` Flutter build number değeridir.
+
+Versiyon artırma:
+
+```bash
+dart run tool/bump_version.dart patch
+dart run tool/bump_version.dart minor
+dart run tool/bump_version.dart major
+```
+
+Release çıkarmak için önce versiyonu artırın, değişikliği commit'leyin, sonra `vX.Y.Z` formatında tag oluşturup push'layın:
+
+```bash
+git add pubspec.yaml
+git commit -m "Bump version to 1.1.0"
+git tag v1.1.0
+git push origin main
+git push origin v1.1.0
+```
+
+`vX.Y.Z` tag'i pushlandığında release workflow lint ve test çalıştırır; başarılı olursa GitHub Release oluşturur.
 
 ## Proje Yapısı
 
