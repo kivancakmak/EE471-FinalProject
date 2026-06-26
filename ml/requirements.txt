@@ -1,0 +1,7 @@
+# Faz 1 eğitim pipeline'ı için Python bağımlılıkları.
+# Colab'da çoğu hazır gelir; yerelde kurmak için: pip install -r requirements.txt
+tensorflow==2.16.1
+tensorflow-datasets==4.9.6
+numpy<2.0
+pandas
+pillow

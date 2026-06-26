@@ -1,0 +1,155 @@
+"""
+Faz 3 — On-device TFLite modelini Gemini (cloud) ile kıyaslar.
+
+Food-101 validation setinden örnekler alır; her iki yöntemin kalori tahminini
+gerçek sınıfın referans kalorisiyle karşılaştırır. Çıktı: out/comparison.md.
+
+Kullanım:
+    python evaluate_vs_gemini.py --samples 200
+    GEMINI_API_KEY=... python evaluate_vs_gemini.py --samples 200 \
+        --with-gemini --gemini-samples 30
+"""
+
+import argparse
+import base64
+import csv
+import io
+import json
+import os
+import time
+import urllib.request
+
+import numpy as np
+import tensorflow as tf
+import tensorflow_datasets as tfds
+from PIL import Image
+
+IMG_SIZE = 224
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
+def load_calories(path):
+    cal = {}
+    with open(path, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            cal[row["label"]] = float(row["kcal_per_100g"])
+    return cal
+
+
+def tflite_predict(interp, inp, out, image_uint8):
+    interp.set_tensor(inp["index"], np.expand_dims(image_uint8, 0))
+    t0 = time.perf_counter()
+    interp.invoke()
+    dt = (time.perf_counter() - t0) * 1000
+    probs = interp.get_tensor(out["index"])[0].astype(np.float32)
+    return int(probs.argmax()), dt
+
+
+def gemini_kcal_per_100g(image_uint8, api_key):
+    """Gemini'den yemeğin kcal/100g tahminini ister. (kcal_per_100g, latency_ms)."""
+    img = Image.fromarray(image_uint8)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (
+        "Bu yemeğin 100 gramının yaklaşık kalorisini tahmin et. "
+        'SADECE JSON döndür: {"kcal_per_100g": <sayı>}'
+    )
+    body = json.dumps({
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }).encode()
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={api_key}")
+    req = urllib.request.Request(url, data=body,
+                                 headers={"Content-Type": "application/json"})
+    t0 = time.perf_counter()
+    with urllib.request.urlopen(req, timeout=40) as r:
+        data = json.loads(r.read())
+    dt = (time.perf_counter() - t0) * 1000
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    return float(json.loads(text)["kcal_per_100g"]), dt
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--samples", type=int, default=200)
+    ap.add_argument("--model", default="out/food_classifier.tflite")
+    ap.add_argument("--labels", default="out/labels.txt")
+    ap.add_argument("--calories", default="food101_calories.csv")
+    ap.add_argument("--with-gemini", action="store_true")
+    ap.add_argument("--gemini-samples", type=int, default=30)
+    ap.add_argument("--out", default="out/comparison.md")
+    args = ap.parse_args()
+
+    labels = open(args.labels, encoding="utf-8").read().splitlines()
+    calories = load_calories(args.calories)
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+
+    interp = tf.lite.Interpreter(model_path=args.model)
+    interp.allocate_tensors()
+    inp, out = interp.get_input_details()[0], interp.get_output_details()[0]
+
+    ds = tfds.load("food101", split="validation", as_supervised=True)
+    ds = ds.shuffle(2000).take(args.samples)
+
+    cnn_correct = 0
+    cnn_abs_err, cnn_lat = [], []
+    gem_abs_err, gem_lat = [], []
+    gem_done = 0
+
+    for i, (image, label) in enumerate(tfds.as_numpy(ds)):
+        true_name = labels[int(label)]
+        true_kcal = calories.get(true_name, 0)
+        img = np.array(Image.fromarray(image).resize((IMG_SIZE, IMG_SIZE)),
+                       dtype=np.uint8)
+
+        pred_idx, dt = tflite_predict(interp, inp, out, img)
+        cnn_lat.append(dt)
+        if pred_idx == int(label):
+            cnn_correct += 1
+        cnn_abs_err.append(abs(calories.get(labels[pred_idx], 0) - true_kcal))
+
+        if args.with_gemini and api_key and gem_done < args.gemini_samples:
+            try:
+                kcal, gdt = gemini_kcal_per_100g(img, api_key)
+                gem_abs_err.append(abs(kcal - true_kcal))
+                gem_lat.append(gdt)
+                gem_done += 1
+            except Exception as e:  # noqa: BLE001
+                print(f"Gemini hatası ({i}): {e}")
+
+    model_kb = os.path.getsize(args.model) / 1024
+    n = len(cnn_lat)
+
+    def mean(xs):
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    lines = [
+        "# On-device CNN vs Cloud Gemini — Kıyaslama",
+        "",
+        f"Örnek sayısı: {n} (Gemini: {gem_done})",
+        "",
+        "| Metrik | On-device CNN (TFLite) | Cloud LLM (Gemini) |",
+        "|---|---|---|",
+        f"| Top-1 sınıf doğruluğu | %{cnn_correct / n * 100:.1f} | — (sınıf yok) |",
+        f"| Kalori MAE (kcal/100g) | {mean(cnn_abs_err):.1f} | "
+        f"{mean(gem_abs_err):.1f} |",
+        f"| Ortalama gecikme (ms) | {mean(cnn_lat):.1f} | {mean(gem_lat):.0f} |",
+        f"| Model boyutu | {model_kb:.0f} KB | bulutta (N/A) |",
+        "| İnternet gerekir | Hayır | Evet |",
+        "| Maliyet | Yok | API kotası |",
+    ]
+    report = "\n".join(lines)
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+        f.write(report + "\n")
+    print(report)
+    print(f"\nTablo '{args.out}' dosyasına yazıldı.")
+
+
+if __name__ == "__main__":
+    main()

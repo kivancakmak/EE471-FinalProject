@@ -1,0 +1,7 @@
+# Eğitim çıktıları ve büyük dosyalar (repoya konmaz)
+out/
+.venv/
+__pycache__/
+*.tflite
+*.keras
+*.h5
