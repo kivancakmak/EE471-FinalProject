@@ -46,7 +46,14 @@ def build_datasets(data_dir: str, batch: int, subset: float):
     return ds_train, ds_val, names
 
 
-def build_model() -> tf.keras.Model:
+BACKBONES = {
+    "mobilenet_small": tf.keras.applications.MobileNetV3Small,
+    "mobilenet_large": tf.keras.applications.MobileNetV3Large,
+    "efficientnetv2b0": tf.keras.applications.EfficientNetV2B0,
+}
+
+
+def build_model(backbone: str) -> tf.keras.Model:
     augment = tf.keras.Sequential(
         [
             tf.keras.layers.RandomFlip("horizontal"),
@@ -55,7 +62,7 @@ def build_model() -> tf.keras.Model:
         ],
         name="augment",
     )
-    base = tf.keras.applications.MobileNetV3Small(
+    base = BACKBONES[backbone](
         input_shape=(IMG_SIZE, IMG_SIZE, 3),
         include_top=False,
         weights="imagenet",
@@ -105,6 +112,11 @@ def main():
     ap.add_argument("--epochs-finetune", type=int, default=15,
                     help="üst sınır; EarlyStopping erken durdurabilir")
     ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--backbone", default="mobilenet_large",
+                    choices=list(BACKBONES.keys()),
+                    help="taban model (büyük = daha doğru, biraz daha yavaş)")
+    ap.add_argument("--unfreeze", type=int, default=60,
+                    help="ince ayarda çözülecek son katman sayısı")
     ap.add_argument("--subset", type=float, default=1.0, help="0-1 arası veri oranı")
     ap.add_argument("--data-dir", default="food-101", help="indirilmiş Food-101 klasörü")
     ap.add_argument("--out-dir", default="out")
@@ -118,7 +130,8 @@ def main():
     with open(os.path.join(args.out_dir, "labels.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(label_names))
 
-    model, base = build_model()
+    model, base = build_model(args.backbone)
+    print(f"Backbone: {args.backbone}")
 
     # Doğruluk artmayı bırakınca otomatik dur, en iyi ağırlıkları geri yükle.
     def callbacks(patience):
@@ -144,8 +157,12 @@ def main():
 
     # 2) İnce ayar: üst katmanları çöz
     base.trainable = True
-    for layer in base.layers[:-40]:
+    for layer in base.layers[: -args.unfreeze]:
         layer.trainable = False
+    # BatchNorm katmanlarını donuk tut (ince ayarda kararlılık için).
+    for layer in base.layers:
+        if isinstance(layer, tf.keras.layers.BatchNormalization):
+            layer.trainable = False
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-5),
         loss="sparse_categorical_crossentropy",
