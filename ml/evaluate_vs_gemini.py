@@ -13,16 +13,17 @@ Kullanım:
 import argparse
 import base64
 import csv
-import io
 import json
 import os
+import random
 import time
 import urllib.request
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_datasets as tfds
 from PIL import Image
+
+from food101_data import list_split
 
 IMG_SIZE = 224
 GEMINI_MODEL = "gemini-2.5-flash"
@@ -45,12 +46,9 @@ def tflite_predict(interp, inp, out, image_uint8):
     return int(probs.argmax()), dt
 
 
-def gemini_kcal_per_100g(image_uint8, api_key):
+def gemini_kcal_per_100g(jpeg_bytes, api_key):
     """Gemini'den yemeğin kcal/100g tahminini ister. (kcal_per_100g, latency_ms)."""
-    img = Image.fromarray(image_uint8)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
+    b64 = base64.b64encode(jpeg_bytes).decode()
     prompt = (
         "Bu yemeğin 100 gramının yaklaşık kalorisini tahmin et. "
         'SADECE JSON döndür: {"kcal_per_100g": <sayı>}'
@@ -82,6 +80,7 @@ def main():
     ap.add_argument("--calories", default="food101_calories.csv")
     ap.add_argument("--with-gemini", action="store_true")
     ap.add_argument("--gemini-samples", type=int, default=30)
+    ap.add_argument("--data-dir", default="food-101")
     ap.add_argument("--out", default="out/comparison.md")
     args = ap.parse_args()
 
@@ -93,19 +92,23 @@ def main():
     interp.allocate_tensors()
     inp, out = interp.get_input_details()[0], interp.get_output_details()[0]
 
-    ds = tfds.load("food101", split="validation", as_supervised=True)
-    ds = ds.shuffle(2000).take(args.samples)
+    paths, labels_idx, _ = list_split(args.data_dir, "test")
+    items = list(zip(paths, labels_idx))
+    random.shuffle(items)
+    items = items[: args.samples]
 
     cnn_correct = 0
     cnn_abs_err, cnn_lat = [], []
     gem_abs_err, gem_lat = [], []
     gem_done = 0
 
-    for i, (image, label) in enumerate(tfds.as_numpy(ds)):
+    for i, (path, label) in enumerate(items):
         true_name = labels[int(label)]
         true_kcal = calories.get(true_name, 0)
-        img = np.array(Image.fromarray(image).resize((IMG_SIZE, IMG_SIZE)),
-                       dtype=np.uint8)
+        img = np.array(
+            Image.open(path).convert("RGB").resize((IMG_SIZE, IMG_SIZE)),
+            dtype=np.uint8,
+        )
 
         pred_idx, dt = tflite_predict(interp, inp, out, img)
         cnn_lat.append(dt)
@@ -115,7 +118,8 @@ def main():
 
         if args.with_gemini and api_key and gem_done < args.gemini_samples:
             try:
-                kcal, gdt = gemini_kcal_per_100g(img, api_key)
+                with open(path, "rb") as fh:
+                    kcal, gdt = gemini_kcal_per_100g(fh.read(), api_key)
                 gem_abs_err.append(abs(kcal - true_kcal))
                 gem_lat.append(gdt)
                 gem_done += 1

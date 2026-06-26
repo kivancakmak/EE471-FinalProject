@@ -27,9 +27,13 @@ problemdir (porsiyon/hacim belirsiz). Bunun yerine **iki adımlı** çözüm:
 
 ## Kurulum
 
-**Colab (önerilen, ücretsiz GPU):** yeni not defteri → `ml/` dosyalarını yükle →
+> `tensorflow-datasets` KULLANILMIYOR (Colab'da protobuf çakışması yaratıyordu).
+> Veri seti resmi tar'dan indiriliyor.
+
+**Colab (önerilen, ücretsiz GPU):** Runtime → GPU seç. Repoyu klonla:
 ```python
-!pip install -q tensorflow-datasets
+!git clone https://github.com/kivancakmak/EE471-FinalProject.git
+%cd EE471-FinalProject/ml
 ```
 
 **Yerel:**
@@ -38,6 +42,14 @@ cd ml
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+## 0) Veri setini indir (bir kez, ~5 GB)
+
+```python
+!wget -q --show-progress http://data.vision.ee.ethz.ch/cvl/food-101.tar.gz
+!tar xzf food-101.tar.gz
+```
+Bu, `ml/food-101/` klasörünü oluşturur (images/ + meta/).
 
 ## 1) Eğitim (Faz 1)
 

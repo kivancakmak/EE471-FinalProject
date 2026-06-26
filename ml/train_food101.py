@@ -17,43 +17,33 @@ Hızlı deneme (küçük altküme):
 
 import argparse
 import os
+import random
 
 import tensorflow as tf
-import tensorflow_datasets as tfds
 
-IMG_SIZE = 224
+from food101_data import IMG_SIZE, list_split, make_dataset
+
 NUM_CLASSES = 101
-AUTOTUNE = tf.data.AUTOTUNE
 
 
-def build_datasets(batch: int, subset: float):
-    """Food-101'i yükler; (train, val, label_names) döndürür."""
-    (ds_train, ds_val), info = tfds.load(
-        "food101",
-        split=["train", "validation"],
-        as_supervised=True,
-        with_info=True,
-    )
-    label_names = info.features["label"].names
+def build_datasets(data_dir: str, batch: int, subset: float):
+    """Food-101'i yerel klasörden yükler; (train, val, label_names) döndürür."""
+    tr_paths, tr_labels, names = list_split(data_dir, "train")
+    va_paths, va_labels, _ = list_split(data_dir, "test")
 
     if subset < 1.0:
-        n_train = int(info.splits["train"].num_examples * subset)
-        n_val = int(info.splits["validation"].num_examples * subset)
-        ds_train = ds_train.take(n_train)
-        ds_val = ds_val.take(n_val)
+        def sub(paths, labels):
+            idxs = list(range(len(paths)))
+            random.shuffle(idxs)
+            idxs = idxs[: int(len(paths) * subset)]
+            return [paths[i] for i in idxs], [labels[i] for i in idxs]
 
-    def prep(image, label):
-        image = tf.image.resize(image, (IMG_SIZE, IMG_SIZE))
-        return tf.cast(image, tf.float32), label  # 0..255; base ölçeklemeyi içeride yapar
+        tr_paths, tr_labels = sub(tr_paths, tr_labels)
+        va_paths, va_labels = sub(va_paths, va_labels)
 
-    ds_train = (
-        ds_train.map(prep, num_parallel_calls=AUTOTUNE)
-        .shuffle(2000)
-        .batch(batch)
-        .prefetch(AUTOTUNE)
-    )
-    ds_val = ds_val.map(prep, num_parallel_calls=AUTOTUNE).batch(batch).prefetch(AUTOTUNE)
-    return ds_train, ds_val, label_names
+    ds_train = make_dataset(tr_paths, tr_labels, batch, training=True)
+    ds_val = make_dataset(va_paths, va_labels, batch, training=False)
+    return ds_train, ds_val, names
 
 
 def build_model() -> tf.keras.Model:
@@ -114,11 +104,13 @@ def main():
     ap.add_argument("--epochs-finetune", type=int, default=5)
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--subset", type=float, default=1.0, help="0-1 arası veri oranı")
+    ap.add_argument("--data-dir", default="food-101", help="indirilmiş Food-101 klasörü")
     ap.add_argument("--out-dir", default="out")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    ds_train, ds_val, label_names = build_datasets(args.batch, args.subset)
+    ds_train, ds_val, label_names = build_datasets(
+        args.data_dir, args.batch, args.subset)
 
     # Etiketleri model çıktı sırasıyla kaydet (kalori CSV ile eşleşir).
     with open(os.path.join(args.out_dir, "labels.txt"), "w", encoding="utf-8") as f:
