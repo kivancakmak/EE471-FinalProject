@@ -100,8 +100,10 @@ def export_tflite(model, ds_train, out_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--epochs-head", type=int, default=3)
-    ap.add_argument("--epochs-finetune", type=int, default=5)
+    ap.add_argument("--epochs-head", type=int, default=5,
+                    help="üst sınır; EarlyStopping erken durdurabilir")
+    ap.add_argument("--epochs-finetune", type=int, default=15,
+                    help="üst sınır; EarlyStopping erken durdurabilir")
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--subset", type=float, default=1.0, help="0-1 arası veri oranı")
     ap.add_argument("--data-dir", default="food-101", help="indirilmiş Food-101 klasörü")
@@ -118,13 +120,27 @@ def main():
 
     model, base = build_model()
 
+    # Doğruluk artmayı bırakınca otomatik dur, en iyi ağırlıkları geri yükle.
+    def callbacks(patience):
+        return [
+            tf.keras.callbacks.EarlyStopping(
+                monitor="val_accuracy",
+                patience=patience,
+                restore_best_weights=True,
+            ),
+            tf.keras.callbacks.ReduceLROnPlateau(
+                monitor="val_loss", factor=0.3, patience=2, min_lr=1e-6,
+            ),
+        ]
+
     # 1) Sadece başlığı eğit
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-3),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    model.fit(ds_train, validation_data=ds_val, epochs=args.epochs_head)
+    model.fit(ds_train, validation_data=ds_val, epochs=args.epochs_head,
+              callbacks=callbacks(patience=2))
 
     # 2) İnce ayar: üst katmanları çöz
     base.trainable = True
@@ -135,7 +151,8 @@ def main():
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    model.fit(ds_train, validation_data=ds_val, epochs=args.epochs_finetune)
+    model.fit(ds_train, validation_data=ds_val, epochs=args.epochs_finetune,
+              callbacks=callbacks(patience=3))
 
     loss, acc = model.evaluate(ds_val)
     print(f"\nValidation doğruluk: {acc:.3f}")
