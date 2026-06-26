@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+2
+version: 2.0.0+3
 
 environment:
   sdk: ^3.12.0
@@ -54,6 +54,9 @@ dependencies:
   # Simple charts on history screen
   fl_chart: ^0.69.0
   google_fonts: ^8.1.0
+  # On-device (cihaz-içi) TFLite çıkarımı + görüntü işleme
+  tflite_flutter: ^0.12.0
+  image: ^4.2.0
 
 dev_dependencies:
   flutter_test:
@@ -80,6 +83,8 @@ flutter:
   # Load the .env file (holds the optional default Gemini API key).
   assets:
     - .env
+    # On-device model + etiketler + kalori tablosu (food_classifier.tflite buraya konur)
+    - assets/models/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

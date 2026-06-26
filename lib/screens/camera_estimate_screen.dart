@@ -11,6 +11,7 @@ import '../providers/diary_provider.dart';
 import '../providers/nav_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/gemini_service.dart';
+import '../services/on_device_food_service.dart';
 import '../widgets/meal_selector.dart';
 
 /// "AI Kam" sekmesi: fotoğraftan Gemini ile kalori tahmini.
@@ -24,12 +25,17 @@ class CameraEstimateScreen extends StatefulWidget {
 class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
   final _picker = ImagePicker();
   final _gemini = GeminiService();
+  final _onDevice = OnDeviceFoodService();
+
+  // Tahmin kaynağı: 0 = Cloud (Gemini), 1 = Cihaz (TFLite CNN)
+  int _source = 0;
 
   File? _image;
   bool _loading = false;
   int _retryAttempt = 0;
   String? _error;
   AiEstimate? _estimate;
+  String _sourceInfo = '';
 
   // Düzenlenebilir taban değerler (1 porsiyon için).
   String _name = '';
@@ -52,8 +58,15 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
       _image = null;
       _estimate = null;
       _error = null;
+      _sourceInfo = '';
       _portion = 0;
     });
+  }
+
+  @override
+  void dispose() {
+    _onDevice.dispose();
+    super.dispose();
   }
 
   Future<void> _pick(ImageSource source) async {
@@ -61,12 +74,34 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
         source: source, maxWidth: 1024, imageQuality: 85);
     if (picked == null) return;
     if (!mounted) return;
+    final bytes = await picked.readAsBytes();
     setState(() {
       _image = File(picked.path);
       _estimate = null;
       _error = null;
     });
+    if (_source == 0) {
+      await _analyzeCloud(picked, bytes);
+    } else {
+      await _analyzeDevice(bytes);
+    }
+  }
 
+  void _applyEstimate(AiEstimate est, String sourceInfo) {
+    setState(() {
+      _estimate = est;
+      _sourceInfo = sourceInfo;
+      _name = est.foodName;
+      _baseGrams = est.estimatedGrams > 0 ? est.estimatedGrams : 100;
+      _baseCalories = est.calories;
+      _baseProtein = est.protein;
+      _baseCarbs = est.carbs;
+      _baseFat = est.fat;
+    });
+  }
+
+  /// Cloud: Gemini (internet + API anahtarı gerekir).
+  Future<void> _analyzeCloud(XFile picked, Uint8List bytes) async {
     final apiKey = context.read<SettingsProvider>().geminiApiKey;
     if (apiKey.trim().isEmpty) {
       setState(() => _error = 'no_key');
@@ -78,23 +113,30 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
     });
     try {
       final est = await _gemini.estimateFromImage(
-        imageBytes: await picked.readAsBytes(),
+        imageBytes: bytes,
         mimeType: picked.mimeType ?? 'image/jpeg',
         apiKey: apiKey,
         onRetry: (attempt) {
           if (mounted) setState(() => _retryAttempt = attempt);
         },
       );
-      setState(() {
-        _estimate = est;
-        _name = est.foodName;
-        _baseGrams = est.estimatedGrams > 0 ? est.estimatedGrams : 100;
-        _baseCalories = est.calories;
-        _baseProtein = est.protein;
-        _baseCarbs = est.carbs;
-        _baseFat = est.fat;
-      });
+      _applyEstimate(est, 'Gemini (bulut)');
     } on GeminiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = 'Beklenmeyen hata: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Cihaz: eğitilmiş TFLite modeli (offline, internet gerekmez).
+  Future<void> _analyzeDevice(Uint8List bytes) async {
+    setState(() => _loading = true);
+    try {
+      final est = await _onDevice.estimate(bytes);
+      _applyEstimate(est, 'Cihaz • ${_onDevice.lastLatencyMs} ms');
+    } on OnDeviceException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = 'Beklenmeyen hata: $e');
@@ -204,6 +246,36 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // Tahmin kaynağı seçici: Bulut (Gemini) vs Cihaz (CNN)
+            SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(
+                    value: 0,
+                    label: Text('Bulut'),
+                    icon: Icon(Icons.cloud_outlined)),
+                ButtonSegment(
+                    value: 1,
+                    label: Text('Cihaz'),
+                    icon: Icon(Icons.smartphone)),
+              ],
+              selected: {_source},
+              onSelectionChanged: _loading
+                  ? null
+                  : (s) => setState(() {
+                        _source = s.first;
+                        _estimate = null;
+                        _error = null;
+                      }),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _source == 0
+                  ? 'Gemini (bulut) — internet + API anahtarı gerekir'
+                  : 'Cihaz modeli (offline) — kendi eğittiğin CNN',
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
             _imageArea(),
             const SizedBox(height: 12),
             Row(
@@ -337,6 +409,9 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
                 ),
               ],
             ),
+            if (_sourceInfo.isNotEmpty)
+              Text('Kaynak: $_sourceInfo',
+                  style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 4),
             Text(_name,
                 style: const TextStyle(
