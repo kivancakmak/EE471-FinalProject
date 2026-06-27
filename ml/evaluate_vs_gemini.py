@@ -20,6 +20,7 @@ import json
 import os
 import random
 import time
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -54,8 +55,11 @@ def tflite_predict(interp, inp, out, image_uint8):
     return int(probs.argmax()), top3, dt
 
 
-def gemini_kcal_per_100g(jpeg_bytes, api_key):
-    """Gemini'den yemeğin kcal/100g tahminini ister. (kcal_per_100g, latency_ms)."""
+def gemini_kcal_per_100g(jpeg_bytes, api_key, max_retries=4):
+    """Gemini'den yemeğin kcal/100g tahminini ister. (kcal_per_100g, latency_ms).
+
+    429 (oran sınırı) ve geçici 5xx hatalarında üstel beklemeyle yeniden dener.
+    """
     b64 = base64.b64encode(jpeg_bytes).decode()
     prompt = (
         "Bu yemeğin 100 gramının yaklaşık kalorisini tahmin et. "
@@ -70,14 +74,26 @@ def gemini_kcal_per_100g(jpeg_bytes, api_key):
     }).encode()
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={api_key}")
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json"})
-    t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=40) as r:
-        data = json.loads(r.read())
-    dt = (time.perf_counter() - t0) * 1000
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    return float(json.loads(text)["kcal_per_100g"]), dt
+
+    for attempt in range(max_retries):
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": "application/json"})
+        t0 = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                data = json.loads(r.read())
+            dt = (time.perf_counter() - t0) * 1000
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            return float(json.loads(text)["kcal_per_100g"]), dt
+        except urllib.error.HTTPError as e:
+            # 429 = oran sınırı, 5xx = geçici. Bekle ve tekrar dene.
+            if e.code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                wait = 5 * (attempt + 1)  # 5, 10, 15 sn
+                print(f"  Gemini {e.code}: {wait} sn bekleniyor...")
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("Gemini: tüm denemeler başarısız")
 
 
 def main():
@@ -88,6 +104,8 @@ def main():
     ap.add_argument("--calories", default="food101_calories.csv")
     ap.add_argument("--with-gemini", action="store_true")
     ap.add_argument("--gemini-samples", type=int, default=30)
+    ap.add_argument("--gemini-delay", type=float, default=4.5,
+                    help="Gemini çağrıları arası bekleme (sn) — oran sınırı için")
     ap.add_argument("--data-dir", default="food-101")
     ap.add_argument("--out", default="out/comparison.md")
     args = ap.parse_args()
@@ -149,6 +167,9 @@ def main():
                 gem_abs_err.append(abs(kcal - true_kcal))
                 gem_lat.append(gdt)
                 gem_done += 1
+                # Oran sınırına takılmamak için çağrılar arası bekle.
+                if gem_done < args.gemini_samples:
+                    time.sleep(args.gemini_delay)
             except Exception as e:  # noqa: BLE001
                 print(f"Gemini hatası ({i}): {e}")
 
