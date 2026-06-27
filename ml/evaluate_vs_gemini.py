@@ -42,7 +42,10 @@ def load_calories(path):
 
 def tflite_predict(interp, inp, out, image_uint8):
     """(top1_idx, top3_idx_list, latency_ms) döndürür."""
-    interp.set_tensor(inp["index"], np.expand_dims(image_uint8, 0))
+    # Modelin beklediği girdi tipine çevir: int8 model uint8 (0..255) bekler,
+    # fp16/float model float32 (0..255) bekler — ölçekleme model içinde yapılır.
+    x = np.expand_dims(image_uint8, 0).astype(inp["dtype"])
+    interp.set_tensor(inp["index"], x)
     t0 = time.perf_counter()
     interp.invoke()
     dt = (time.perf_counter() - t0) * 1000

@@ -32,7 +32,7 @@ def main():
     calories = load_calories(args.calories)
 
     img = Image.open(args.image).convert("RGB").resize((IMG_SIZE, IMG_SIZE))
-    arr = np.expand_dims(np.array(img, dtype=np.uint8), 0)  # int8 model uint8 girdi bekler
+    arr = np.expand_dims(np.array(img, dtype=np.uint8), 0)
 
     # Varsayılan XNNPACK delegesi bazı int8 modellerinde hata verir → delegesiz aç.
     try:
@@ -48,7 +48,7 @@ def main():
         interp.allocate_tensors()
     inp = interp.get_input_details()[0]
     out = interp.get_output_details()[0]
-    interp.set_tensor(inp["index"], arr)
+    interp.set_tensor(inp["index"], arr.astype(inp["dtype"]))
     interp.invoke()
     probs = interp.get_tensor(out["index"])[0].astype(np.float32)
 
