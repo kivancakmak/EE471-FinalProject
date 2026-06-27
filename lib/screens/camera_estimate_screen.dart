@@ -11,6 +11,7 @@ import '../providers/diary_provider.dart';
 import '../providers/nav_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/gemini_service.dart';
+import '../services/gemma_vision_service.dart';
 import '../services/on_device_food_service.dart';
 import '../widgets/meal_selector.dart';
 
@@ -26,8 +27,12 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
   final _picker = ImagePicker();
   final _gemini = GeminiService();
   final _onDevice = OnDeviceFoodService();
+  final _gemma = GemmaVisionService();
 
-  // Tahmin kaynağı: 0 = Cloud (Gemini), 1 = Cihaz (TFLite CNN)
+  // Tahmin kaynağı:
+  //   0 = Cloud LLM   (Gemini, internet)
+  //   1 = Edge CNN    (kendi eğittiğin TFLite sınıflandırıcı)
+  //   2 = Edge LLM    (Gemma 3n multimodal, cihazda)
   int _source = 0;
 
   File? _image;
@@ -66,6 +71,7 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
   @override
   void dispose() {
     _onDevice.dispose();
+    _gemma.dispose();
     super.dispose();
   }
 
@@ -80,10 +86,13 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
       _estimate = null;
       _error = null;
     });
-    if (_source == 0) {
-      await _analyzeCloud(picked, bytes);
-    } else {
-      await _analyzeDevice(bytes);
+    switch (_source) {
+      case 0:
+        await _analyzeCloud(picked, bytes);
+      case 1:
+        await _analyzeDevice(bytes);
+      case 2:
+        await _analyzeGemma(bytes);
     }
   }
 
@@ -136,6 +145,36 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
     try {
       final est = await _onDevice.estimate(bytes);
       _applyEstimate(est, 'Cihaz • ${_onDevice.lastLatencyMs} ms');
+    } on OnDeviceException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = 'Beklenmeyen hata: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Edge LLM hattı (offline): CNN fotoğrafı tanır → Gemma 1B kalori+makro
+  /// muhakemesi yapar. İkisi de cihazda çalışır.
+  Future<void> _analyzeGemma(Uint8List bytes) async {
+    setState(() => _loading = true);
+    try {
+      // 1) Algı: kendi eğittiğimiz CNN yemeği tanır.
+      final cnn = await _onDevice.estimate(bytes);
+      final cnnMs = _onDevice.lastLatencyMs;
+      // 2) Muhakeme: Gemma 1B, yemek adından kalori+makro üretir.
+      final est = await _gemma.estimateFromText(
+        foodName: cnn.foodName,
+        grams: cnn.estimatedGrams,
+      );
+      final backend =
+          _gemma.backendInfo.isEmpty ? '' : ' • ${_gemma.backendInfo}';
+      _applyEstimate(
+        est,
+        'CNN→Gemma 1B (cihaz) • $cnnMs+${_gemma.lastLatencyMs} ms$backend',
+      );
+    } on GemmaException catch (e) {
+      setState(() => _error = e.needsModel ? 'gemma_no_model' : e.message);
     } on OnDeviceException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -246,7 +285,7 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // Tahmin kaynağı seçici: Bulut (Gemini) vs Cihaz (CNN)
+            // Tahmin kaynağı seçici: Cloud LLM / Edge CNN / Edge LLM
             SegmentedButton<int>(
               segments: const [
                 ButtonSegment(
@@ -255,10 +294,15 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
                     icon: Icon(Icons.cloud_outlined)),
                 ButtonSegment(
                     value: 1,
-                    label: Text('Cihaz'),
+                    label: Text('CNN'),
                     icon: Icon(Icons.smartphone)),
+                ButtonSegment(
+                    value: 2,
+                    label: Text('Gemma'),
+                    icon: Icon(Icons.auto_awesome)),
               ],
               selected: {_source},
+              showSelectedIcon: false,
               onSelectionChanged: _loading
                   ? null
                   : (s) => setState(() {
@@ -269,9 +313,11 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              _source == 0
-                  ? 'Gemini (bulut) — internet + API anahtarı gerekir'
-                  : 'Cihaz modeli (offline) — kendi eğittiğin CNN',
+              switch (_source) {
+                0 => 'Cloud LLM • Gemini — internet + API anahtarı gerekir',
+                1 => 'Edge CNN • kendi eğittiğin TFLite modeli (offline)',
+                _ => 'Edge LLM • CNN tanır → Gemma 1B muhakeme (offline)',
+              },
               style: Theme.of(context).textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),
@@ -373,6 +419,44 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
                 onPressed: () => context.read<NavProvider>().go(4),
                 icon: const Icon(Icons.key),
                 label: const Text('Ayarlara Git'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_error == 'gemma_no_model') {
+      const path =
+          '/sdcard/Android/data/com.ee471.kalori_takip/files/${GemmaVisionService.modelFileName}';
+      return Card(
+        color: scheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Gemma model dosyası cihazda yok. ~550 MB\'lık Gemma 3 1B '
+                'modelini bir kez adb ile telefona yükle:',
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const SelectableText(
+                  'adb push ${GemmaVisionService.modelFileName} \\\n  $path',
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Model: HuggingFace litert-community/Gemma3-1B-IT (.task). '
+                'Orta sınıf telefonda (4 GB+) çalışır.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),

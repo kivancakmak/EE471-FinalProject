@@ -7,7 +7,10 @@ Günlük kalori alımını takip etmek için Flutter ile geliştirilmiş bir And
 - **Öğün ekleme:** Open Food Facts veritabanında yemek arama; porsiyon / gram / ml seçimiyle otomatik kalori hesabı.
 - **Manuel ekleme:** Yemek adı ve kalorisini elle girme.
 - **Günlük takip:** Öğünlere göre (kahvaltı/öğle/akşam/atıştırmalık) gruplama, dairesel ilerleme halkası, hedefe göre kalan/aşan kalori, makro (protein/karb/yağ) toplamları.
-- **AI ile fotoğraftan kalori:** Kamerayla çekilen veya galeriden seçilen yemeğin fotoğrafını Gemini'ye gönderip tahmini kaloriyi alma; değerleri düzeltip günlüğe ekleme.
+- **AI ile fotoğraftan kalori (3 kaynak — Edge vs Cloud):** Kamerayla çekilen veya galeriden seçilen yemeğin fotoğrafından tahmini kalori; değerleri düzeltip günlüğe ekleme. AI Kam ekranında kaynak seçilebilir:
+  - **Bulut (Cloud LLM):** Gemini 2.5 Flash — internet + API anahtarı gerekir, en doğru.
+  - **CNN (Edge CNN):** Kendi eğittiğimiz Food-101 TFLite sınıflandırıcısı (~3.5 MB) — tamamen cihazda, anlık (~100 ms).
+  - **Gemma (Edge LLM):** Cihaz-içi hat — CNN yemeği tanır, **Gemma 3 1B** (MediaPipe LiteRT) kalori + makroları metin muhakemesiyle üretir. Tamamen offline. Kurulum: [ml/GEMMA_3N_SETUP.md](ml/GEMMA_3N_SETUP.md).
 - **Geçmiş:** Son 7 günün grafiği ve tüm günlerin toplamları.
 - **Yerel saklama:** Veriler cihazda SQLite ile tutulur (hesap/internet gerektirmez; arama ve AI için internet gerekir).
 
@@ -63,6 +66,27 @@ Gerçek telefonda telefon ve bilgisayar aynı Wi-Fi ağında olmalı; uygulamada
 
 > Not: Kamera özelliğini test etmek için gerçek cihaz önerilir.
 
+## On-Device ML — Edge vs Cloud Kıyası
+
+Proje, fotoğraftan kalori tahminini üç farklı yaklaşımla yapabilir ve karşılaştırır:
+
+| Kaynak | Tür | Model | Boyut | İnternet | Gecikme (ölçülen) |
+|---|---|---|---|---|---|
+| **Bulut** | Cloud LLM | Gemini 2.5 Flash | — (sunucu) | Gerekir | ~1–3 sn (ağ) |
+| **CNN** | Edge CNN | Food-101 TFLite (kendi eğitimimiz) | ~3.5 MB | Gerekmez | **~94 ms** |
+| **Gemma** | Edge LLM | CNN→Gemma 3 1B (LiteRT) | ~550 MB | Gerekmez | **~13.8 sn** (CPU) |
+
+> Ölçüm: Redmi Note 10S (6 GB RAM), CPU backend. CNN algı 94 ms, Gemma 1B muhakeme ~13.8 sn.
+
+**Bulgular:**
+- **Edge CNN** anlık ve çok hafif; ama sadece 101 sınıf, kaloriyi sabit tablodan eşler, makro üretmez.
+- **Edge LLM (Gemma)** offline + gizli (foto cihazdan çıkmaz) + makro üretir; bedeli yüksek gecikme.
+- **Cloud LLM (Gemini)** en doğru ve serbest yemek tanır; ama internet + API kotası + gizlilik (foto buluta gider).
+- **Donanım sınırı:** Gemma 3n E2B (~3 GB, multimodal) 8 GB+ RAM ister; 6 GB cihazda işletim sistemi uygulamayı yükleme anında öldürür (lowmemorykill). Bu yüzden cihaz-içi LLM olarak **CNN algı + Gemma 1B muhakeme** hattı tercih edildi.
+
+Model eğitimi (Food-101), TFLite dışa aktarımı, Gemma kurulumu (adb push) ve kıyas
+harness'ı `ml/` klasöründedir: [ml/README.md](ml/README.md), [ml/GEMMA_3N_SETUP.md](ml/GEMMA_3N_SETUP.md).
+
 ## Testler
 
 ```bash
@@ -85,7 +109,7 @@ Test:
 flutter test
 ```
 
-Versiyon `pubspec.yaml` içindeki `version` alanında Semantic Versioning formatında tutulur. Güncel versiyon `1.1.0+2` değeridir; `+2` Flutter build number değeridir.
+Versiyon `pubspec.yaml` içindeki `version` alanında Semantic Versioning formatında tutulur. Güncel versiyon `3.0.0+4` değeridir; `+4` Flutter build number değeridir.
 
 Versiyon artırma:
 
@@ -112,12 +136,15 @@ git push origin v1.1.0
 ```
 lib/
   models/        # Food, FoodEntry, DailySummary, enums
-  services/      # database_service, off_service (Open Food Facts), gemini_service
+  services/      # database_service, off_service, gemini_service (Cloud LLM),
+                 #   on_device_food_service (Edge CNN/TFLite),
+                 #   gemma_vision_service (Edge LLM/Gemma 1B)
   repositories/  # food_log_repository (yerel; bulut için soyutlanmış)
   providers/     # diary_provider, settings_provider (Provider/ChangeNotifier)
   screens/       # home, add_food, camera_estimate, history, settings
   widgets/       # calorie_ring, meal_section, food_entry_tile, log_food_sheet
   utils/         # date_helpers
+ml/              # Food-101 eğitim pipeline, TFLite dışa aktarım, Gemma kurulum + kıyas
 ```
 
 ## Sonraki Adımlar (planlanan)
