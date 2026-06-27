@@ -1,13 +1,16 @@
 """
-Faz 3 — On-device TFLite modelini Gemini (cloud) ile kıyaslar.
+Faz 3 — Edge (TFLite CNN + Gemma) vs Cloud (Gemini) kıyas harness'ı.
 
-Food-101 validation setinden örnekler alır; her iki yöntemin kalori tahminini
-gerçek sınıfın referans kalorisiyle karşılaştırır. Çıktı: out/comparison.md.
+Food-101 TEST setinden örnekler alır; CNN için top-1 ve top-3 doğruluğu
+(top-3 = Edge LLM/Gemma'nın tanıma tavanı) ile kalori MAE'sini ölçer, isteğe
+bağlı olarak Gemini'nin kalori MAE'siyle kıyaslar. Çıktı: out/comparison.md.
+
+Veri seti Colab'de indirilir; adım adım: COLAB_EVAL.md.
 
 Kullanım:
-    python evaluate_vs_gemini.py --samples 200
-    GEMINI_API_KEY=... python evaluate_vs_gemini.py --samples 200 \
-        --with-gemini --gemini-samples 30
+    python evaluate_vs_gemini.py --samples 500 --data-dir food-101
+    GEMINI_API_KEY=... python evaluate_vs_gemini.py --samples 500 \
+        --with-gemini --gemini-samples 40 --data-dir food-101
 """
 
 import argparse
@@ -38,12 +41,14 @@ def load_calories(path):
 
 
 def tflite_predict(interp, inp, out, image_uint8):
+    """(top1_idx, top3_idx_list, latency_ms) döndürür."""
     interp.set_tensor(inp["index"], np.expand_dims(image_uint8, 0))
     t0 = time.perf_counter()
     interp.invoke()
     dt = (time.perf_counter() - t0) * 1000
     probs = interp.get_tensor(out["index"])[0].astype(np.float32)
-    return int(probs.argmax()), dt
+    top3 = probs.argsort()[-3:][::-1].tolist()
+    return int(probs.argmax()), top3, dt
 
 
 def gemini_kcal_per_100g(jpeg_bytes, api_key):
@@ -88,8 +93,21 @@ def main():
     calories = load_calories(args.calories)
     api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    interp = tf.lite.Interpreter(model_path=args.model)
-    interp.allocate_tensors()
+    # Bazı int8 modelleri + yeni TF'te varsayılan XNNPACK delegesi bir düğümü
+    # hazırlayamayıp "failed to create XNNPACK runtime" hatası verir. Delegesiz
+    # (saf CPU referans çekirdekleri) oluşturmak bunu giderir; değerlendirme için
+    # hız yeterli.
+    try:
+        interp = tf.lite.Interpreter(
+            model_path=args.model,
+            experimental_op_resolver_type=(
+                tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+            ),
+        )
+        interp.allocate_tensors()
+    except Exception:
+        interp = tf.lite.Interpreter(model_path=args.model)
+        interp.allocate_tensors()
     inp, out = interp.get_input_details()[0], interp.get_output_details()[0]
 
     paths, labels_idx, _ = list_split(args.data_dir, "test")
@@ -98,6 +116,7 @@ def main():
     items = items[: args.samples]
 
     cnn_correct = 0
+    cnn_top3_correct = 0
     cnn_abs_err, cnn_lat = [], []
     gem_abs_err, gem_lat = [], []
     gem_done = 0
@@ -110,10 +129,14 @@ def main():
             dtype=np.uint8,
         )
 
-        pred_idx, dt = tflite_predict(interp, inp, out, img)
+        pred_idx, top3, dt = tflite_predict(interp, inp, out, img)
         cnn_lat.append(dt)
         if pred_idx == int(label):
             cnn_correct += 1
+        # Top-3: Edge LLM (Gemma) CNN'in ilk 3 adayından seçtiği için bu, o
+        # hattın yemek-tanıma doğruluk TAVANIDIR.
+        if int(label) in top3:
+            cnn_top3_correct += 1
         cnn_abs_err.append(abs(calories.get(labels[pred_idx], 0) - true_kcal))
 
         if args.with_gemini and api_key and gem_done < args.gemini_samples:
@@ -132,20 +155,30 @@ def main():
     def mean(xs):
         return sum(xs) / len(xs) if xs else float("nan")
 
+    top1 = cnn_correct / n * 100
+    top3 = cnn_top3_correct / n * 100
     lines = [
-        "# On-device CNN vs Cloud Gemini — Kıyaslama",
+        "# Edge vs Cloud — Kıyaslama (Food-101 test seti)",
         "",
-        f"Örnek sayısı: {n} (Gemini: {gem_done})",
+        f"Örnek sayısı: {n} (Gemini: {gem_done}). "
+        "Gecikmeler masaüstünde ölçülür; telefon değerleri için README'ye bakın.",
         "",
-        "| Metrik | On-device CNN (TFLite) | Cloud LLM (Gemini) |",
-        "|---|---|---|",
-        f"| Top-1 sınıf doğruluğu | %{cnn_correct / n * 100:.1f} | — (sınıf yok) |",
+        "| Metrik | Edge CNN (TFLite) | Edge LLM (CNN→Gemma 1B) | Cloud LLM (Gemini) |",
+        "|---|---|---|---|",
+        f"| Yemek tanıma doğruluğu | %{top1:.1f} (top-1) | "
+        f"≤ %{top3:.1f} (top-3 tavanı) | serbest (sınıf yok) |",
         f"| Kalori MAE (kcal/100g) | {mean(cnn_abs_err):.1f} | "
-        f"{mean(gem_abs_err):.1f} |",
-        f"| Ortalama gecikme (ms) | {mean(cnn_lat):.1f} | {mean(gem_lat):.0f} |",
-        f"| Model boyutu | {model_kb:.0f} KB | bulutta (N/A) |",
-        "| İnternet gerekir | Hayır | Evet |",
-        "| Maliyet | Yok | API kotası |",
+        f"CNN tablosu / LLM | {mean(gem_abs_err):.1f} |",
+        f"| Ortalama gecikme | {mean(cnn_lat):.1f} ms | ~13.8 sn (telefon) | "
+        f"{mean(gem_lat):.0f} ms |",
+        f"| Model boyutu | {model_kb:.0f} KB | ~550 MB | bulutta (N/A) |",
+        "| Makro üretir | Hayır | Evet | Evet |",
+        "| İnternet gerekir | Hayır | Hayır | Evet |",
+        "| Maliyet | Yok | Yok | API kotası |",
+        "",
+        "**Not:** Edge LLM (Gemma) yemeği CNN'in ilk 3 adayından seçtiği için "
+        f"tanıma tavanı top-3 doğruluğudur (%{top3:.1f}); top-1'in (%{top1:.1f}) "
+        "üstüne, doğru sınıf ilk 3'teyse kurtarma payı ekler ve ayrıca makro üretir.",
     ]
     report = "\n".join(lines)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

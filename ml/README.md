@@ -75,17 +75,21 @@ python predict.py --image ornek_yemek.jpg
 
 ## 3) Kıyaslama (Faz 3)
 
-Sadece on-device:
+Üç-yönlü kıyas: **Edge CNN** vs **Edge LLM (CNN→Gemma)** vs **Cloud LLM (Gemini)**.
+Paste-ready Colab adımları: **[COLAB_EVAL.md](COLAB_EVAL.md)**.
+
+Sadece on-device CNN (top-1 + top-3 doğruluk + kalori MAE):
 ```bash
-python evaluate_vs_gemini.py --samples 200
+python evaluate_vs_gemini.py --samples 500 --data-dir food-101
 ```
 Gemini ile birlikte (API anahtarı gerekir, sınırlı örnek önerilir):
 ```bash
 export GEMINI_API_KEY=...        # Windows: set GEMINI_API_KEY=...
-python evaluate_vs_gemini.py --samples 200 --with-gemini --gemini-samples 30
+python evaluate_vs_gemini.py --samples 500 --with-gemini --gemini-samples 40 --data-dir food-101
 ```
-Çıktı: doğruluk, kalori MAE, ortalama gecikme (ms), model boyutu içeren markdown tablo
-(`out/comparison.md`). Rapora doğrudan eklenebilir.
+Çıktı (`out/comparison.md`): top-1/top-3 doğruluk, kalori MAE, gecikme, model boyutu
+içeren markdown tablo. **top-3 doğruluk = Edge LLM (Gemma) tanıma tavanı** (Gemma yemeği
+CNN'in ilk 3 adayından seçer). Rapora doğrudan eklenebilir.
 
 ## Telefona gömme (Faz 2 — sonraki adım)
 

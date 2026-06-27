@@ -13,6 +13,15 @@ class OnDeviceException implements Exception {
   String toString() => message;
 }
 
+/// CNN'in bir aday tahmini: gösterimlik ad, ham etiket ve olasılık.
+class FoodCandidate {
+  final String name; // "Grilled Salmon"
+  final String label; // "grilled_salmon"
+  final double probability; // 0..1
+  final double kcalPer100;
+  FoodCandidate(this.name, this.label, this.probability, this.kcalPer100);
+}
+
 /// Cihaz-içi (offline) yemek sınıflandırma: Food-101 üzerinde eğitilmiş int8
 /// TFLite modeli ile tahmin yapar, sınıfı kcal/100g'a çevirir.
 class OnDeviceFoodService {
@@ -60,8 +69,8 @@ class OnDeviceFoodService {
     return map;
   }
 
-  /// Fotoğraf baytlarından tahmin üretir.
-  Future<AiEstimate> estimate(Uint8List imageBytes) async {
+  /// Modeli çalıştırıp ham skor dizisini döndürür (uint8 0..255).
+  Future<List<int>> _infer(Uint8List imageBytes) async {
     await _ensureLoaded();
 
     final decoded = img.decodeImage(imageBytes);
@@ -91,9 +100,14 @@ class OnDeviceFoodService {
     sw.stop();
     lastLatencyMs = sw.elapsedMilliseconds;
 
-    final scores = output[0];
+    return output[0];
+  }
+
+  /// Fotoğraf baytlarından tek (en olası) tahmin üretir.
+  Future<AiEstimate> estimate(Uint8List imageBytes) async {
+    final scores = await _infer(imageBytes);
     var best = 0;
-    for (var i = 1; i < numClasses; i++) {
+    for (var i = 1; i < scores.length; i++) {
       if (scores[i] > scores[best]) best = i;
     }
     final label = _labels[best];
@@ -106,6 +120,25 @@ class OnDeviceFoodService {
       calories: kcal100 * _defaultGrams / 100,
       confidence: prob > 0.6 ? 'high' : (prob > 0.35 ? 'medium' : 'low'),
     );
+  }
+
+  /// En olası ilk [k] adayı (olasılığa göre azalan) döndürür.
+  /// Gemma'ya verilip "hangisi daha olası" diye seçtirmek için kullanılır.
+  Future<List<FoodCandidate>> classifyTopK(Uint8List imageBytes,
+      {int k = 3}) async {
+    final scores = await _infer(imageBytes);
+    final idx = List<int>.generate(scores.length, (i) => i)
+      ..sort((a, b) => scores[b].compareTo(scores[a]));
+    final top = idx.take(k).map((i) {
+      final label = _labels[i];
+      return FoodCandidate(
+        _prettify(label),
+        label,
+        scores[i] / 255.0,
+        _calories[label] ?? 0,
+      );
+    }).toList();
+    return top;
   }
 
   /// "grilled_salmon" -> "Grilled Salmon"

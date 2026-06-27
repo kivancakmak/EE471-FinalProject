@@ -159,13 +159,14 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
   Future<void> _analyzeGemma(Uint8List bytes) async {
     setState(() => _loading = true);
     try {
-      // 1) Algı: kendi eğittiğimiz CNN yemeği tanır.
-      final cnn = await _onDevice.estimate(bytes);
+      // 1) Algı: CNN ilk 3 adayı çıkarır.
+      final candidates = await _onDevice.classifyTopK(bytes, k: 3);
       final cnnMs = _onDevice.lastLatencyMs;
-      // 2) Muhakeme: Gemma 1B, yemek adından kalori+makro üretir.
-      final est = await _gemma.estimateFromText(
-        foodName: cnn.foodName,
-        grams: cnn.estimatedGrams,
+      // 2) Muhakeme: Gemma 1B adayları değerlendirip seçer, adı özelleştirir,
+      //    gerekçelendirir ve kalori+makro üretir.
+      final est = await _gemma.estimateFromCandidates(
+        candidates,
+        grams: candidates.isNotEmpty ? 300 : null,
       );
       final backend =
           _gemma.backendInfo.isEmpty ? '' : ' • ${_gemma.backendInfo}';
@@ -496,6 +497,25 @@ class _CameraEstimateScreenState extends State<CameraEstimateScreen> {
             if (_sourceInfo.isNotEmpty)
               Text('Kaynak: $_sourceInfo',
                   style: Theme.of(context).textTheme.bodySmall),
+            if (_estimate!.reasoning != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.psychology_outlined,
+                      size: 16, color: scheme.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _estimate!.reasoning!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 4),
             Text(_name,
                 style: const TextStyle(

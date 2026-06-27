@@ -5,6 +5,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'gemini_service.dart' show AiEstimate;
+import 'on_device_food_service.dart' show FoodCandidate;
 
 /// Gemma servisi hataları. [needsModel] true ise model dosyası cihazda yok
 /// (kullanıcıya adb push talimatı gösterilir).
@@ -147,10 +148,12 @@ class GemmaVisionService {
     }
   }
 
-  /// CNN'in tanıdığı yemek adından (ve tahmini gramdan) kalori + makroları
-  /// cihaz-içi Gemma 1B ile muhakeme eder.
-  Future<AiEstimate> estimateFromText({
-    required String foodName,
+  /// CNN'in ilk birkaç adayını Gemma 1B'ye verir; model en olası yemeği SEÇER,
+  /// adı özelleştirir (ör. "Pizza" → "Margherita Pizza"), kısa bir GEREKÇE yazar
+  /// ve kalori + makroları muhakeme eder. Böylece Gemma sadece tabloyu tekrarlamaz,
+  /// CNN'in üstüne bir muhakeme katmanı ekler.
+  Future<AiEstimate> estimateFromCandidates(
+    List<FoodCandidate> candidates, {
     double? grams,
   }) async {
     await _ensureReady();
@@ -161,14 +164,26 @@ class GemmaVisionService {
     }
     _used = true;
 
-    final portion = (grams != null && grams > 0)
-        ? '${grams.round()} g'
-        : 'tipik bir porsiyon';
+    final top = candidates.isNotEmpty ? candidates.first : null;
+    final fallbackName = top?.name ?? 'Bilinmeyen';
+    final refKcal100 = top?.kcalPer100 ?? 0;
+    final gramsVal = (grams != null && grams > 0) ? grams : 300.0;
+
+    final others = candidates.length > 1
+        ? candidates.skip(1).map((c) => c.name).join(', ')
+        : 'yok';
+
+    // Sade ve referanslı prompt: küçük model güvenilir sayı üretsin diye
+    // CNN'in tablo değeri (kcal/100g) ipucu olarak verilir.
     final prompt = '''
-"$foodName" adlı yemeğin $portion'lık porsiyonunu besin değeri açısından değerlendir.
-Yanıtı SADECE şu JSON şemasıyla ver, başka metin/açıklama ekleme:
+Bir fotoğraf sınıflandırıcı bu yemeği "${top?.name}" olarak tahmin etti
+(diğer olasılıklar: $others). Referans: bu yemek ~${refKcal100.round()} kcal/100g.
+Bu yemeğin ${gramsVal.round()} g'lık porsiyonu için besin değerlerini hesapla.
+İstersen adı biraz daha spesifik yapabilirsin ve tek cümlelik kısa bir gerekçe ekle.
+Yanıtı SADECE şu JSON ile ver, sayıları gerçek tahminlerle doldur:
 {
-  "food_name": "$foodName",
+  "food_name": "<ad>",
+  "reason": "<tek cümle gerekçe>",
   "estimated_grams": <porsiyon gramı, sayı>,
   "calories": <toplam kalori, sayı>,
   "protein": <protein gramı, sayı>,
@@ -185,7 +200,24 @@ Yanıtı SADECE şu JSON şemasıyla ver, başka metin/açıklama ekleme:
     lastLatencyMs = sw.elapsedMilliseconds;
 
     final text = resp is TextResponse ? resp.token : resp.toString();
-    return _parse(text, fallbackName: foodName);
+    var est = _parse(text, fallbackName: fallbackName);
+
+    // Güvenlik ağı: model 0/boş kalori verdiyse CNN tablosuna düş — sonuç
+    // asla eski CNN modundan kötü olmasın.
+    if (est.calories <= 0 && refKcal100 > 0) {
+      final g = est.estimatedGrams > 0 ? est.estimatedGrams : gramsVal;
+      est = AiEstimate(
+        foodName: est.foodName,
+        estimatedGrams: g,
+        calories: refKcal100 * g / 100,
+        protein: est.protein,
+        carbs: est.carbs,
+        fat: est.fat,
+        confidence: est.confidence,
+        reasoning: est.reasoning,
+      );
+    }
+    return est;
   }
 
   AiEstimate _parse(String text, {required String fallbackName}) {
@@ -215,6 +247,9 @@ Yanıtı SADECE şu JSON şemasıyla ver, başka metin/açıklama ekleme:
         carbs: json['carbs'] == null ? null : _num(json['carbs']),
         fat: json['fat'] == null ? null : _num(json['fat']),
         confidence: (json['confidence'] as String?) ?? 'low',
+        reasoning: (json['reason'] as String?)?.trim().isNotEmpty == true
+            ? json['reason'] as String
+            : null,
       );
     } catch (_) {
       throw GemmaException('Gemma yanıtı çözümlenemedi: $clean');

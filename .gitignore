@@ -44,6 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Sunum / büyük ikili dosyalar — repoya gitmesin
+*.pptx
+*.pdf
+
+# Yerel test fotoğrafları (kişisel) — repoya gitmesin
+Telefondaki fotolar/
+
 # Secrets — do not commit the real Gemini API key
 .env
 backend/.env

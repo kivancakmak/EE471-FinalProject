@@ -34,8 +34,18 @@ def main():
     img = Image.open(args.image).convert("RGB").resize((IMG_SIZE, IMG_SIZE))
     arr = np.expand_dims(np.array(img, dtype=np.uint8), 0)  # int8 model uint8 girdi bekler
 
-    interp = tf.lite.Interpreter(model_path=args.model)
-    interp.allocate_tensors()
+    # Varsayılan XNNPACK delegesi bazı int8 modellerinde hata verir → delegesiz aç.
+    try:
+        interp = tf.lite.Interpreter(
+            model_path=args.model,
+            experimental_op_resolver_type=(
+                tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+            ),
+        )
+        interp.allocate_tensors()
+    except Exception:
+        interp = tf.lite.Interpreter(model_path=args.model)
+        interp.allocate_tensors()
     inp = interp.get_input_details()[0]
     out = interp.get_output_details()[0]
     interp.set_tensor(inp["index"], arr)

@@ -12,6 +12,7 @@ class AiEstimate {
   final double? carbs;
   final double? fat;
   final String confidence; // low | medium | high
+  final String? reasoning; // ör. Gemma'nın adayı seçme gerekçesi (opsiyonel)
 
   AiEstimate({
     required this.foodName,
@@ -21,6 +22,7 @@ class AiEstimate {
     this.carbs,
     this.fat,
     required this.confidence,
+    this.reasoning,
   });
 
   /// 100 g başına kalori (kayıt modeli bunu kullanır).
