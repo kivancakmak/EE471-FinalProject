@@ -65,7 +65,9 @@ python train_food101.py --subset 0.1 --epochs-head 1 --epochs-finetune 1
 - `food_classifier_fp16.tflite` (daha doğru)
 - `labels.txt` (model çıktı sırasıyla sınıf adları)
 
-> Beklenen doğruluk: MobileNetV3Small + Food-101 ile genelde **%75-85 top-1**.
+> Ölçülen doğruluk (MobileNetV3Large, Food-101 test, 500 örnek): **fp16 %66.8 top-1
+> / %83.6 top-3**. Tam-int8 sürümü MobileNetV3'ün kuantizasyon zorluğundan ~%8'e
+> düşer; bu yüzden uygulama **fp16** kullanır.
 
 ## 2) Hızlı test
 

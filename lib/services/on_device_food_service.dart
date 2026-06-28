@@ -22,10 +22,14 @@ class FoodCandidate {
   FoodCandidate(this.name, this.label, this.probability, this.kcalPer100);
 }
 
-/// Cihaz-içi (offline) yemek sınıflandırma: Food-101 üzerinde eğitilmiş int8
-/// TFLite modeli ile tahmin yapar, sınıfı kcal/100g'a çevirir.
+/// Cihaz-içi (offline) yemek sınıflandırma: Food-101 üzerinde eğitilmiş
+/// float16 TFLite modeli ile tahmin yapar, sınıfı kcal/100g'a çevirir.
+///
+/// Not: int8 yerine fp16 kullanılıyor — MobileNetV3 int8'e çok kötü kuantize
+/// oluyordu (top-1 ~%8), fp16 ise neredeyse kayıpsız (~%67). Girdi/çıktı
+/// float32'dir (0..255 ham; ölçekleme model içinde).
 class OnDeviceFoodService {
-  static const _modelAsset = 'assets/models/food_classifier.tflite';
+  static const _modelAsset = 'assets/models/food_classifier_fp16.tflite';
   static const _labelsAsset = 'assets/models/labels.txt';
   static const _caloriesAsset = 'assets/models/food101_calories.csv';
   static const _imgSize = 224;
@@ -53,8 +57,8 @@ class OnDeviceFoodService {
       _calories = _parseCalories(csv);
     } catch (e) {
       throw OnDeviceException(
-          'Cihaz modeli yüklenemedi. assets/models/ içine food_classifier.tflite '
-          've labels.txt koyup uygulamayı yeniden derle. ($e)');
+          'Cihaz modeli yüklenemedi. assets/models/ içine '
+          'food_classifier_fp16.tflite ve labels.txt koyup yeniden derle. ($e)');
     }
   }
 
@@ -69,8 +73,8 @@ class OnDeviceFoodService {
     return map;
   }
 
-  /// Modeli çalıştırıp ham skor dizisini döndürür (uint8 0..255).
-  Future<List<int>> _infer(Uint8List imageBytes) async {
+  /// Modeli çalıştırıp ham softmax olasılıklarını döndürür (float 0..1).
+  Future<List<double>> _infer(Uint8List imageBytes) async {
     await _ensureLoaded();
 
     final decoded = img.decodeImage(imageBytes);
@@ -80,20 +84,21 @@ class OnDeviceFoodService {
     final resized =
         img.copyResize(decoded, width: _imgSize, height: _imgSize);
 
-    // int8/uint8 model: 0..255 tamsayı girdi [1,224,224,3]
+    // fp16 model: 0..255 float32 girdi [1,224,224,3] (ölçekleme model içinde).
     final input = List.generate(
       1,
       (_) => List.generate(
         _imgSize,
         (y) => List.generate(_imgSize, (x) {
           final p = resized.getPixel(x, y);
-          return [p.r.toInt(), p.g.toInt(), p.b.toInt()];
+          return [p.r.toDouble(), p.g.toDouble(), p.b.toDouble()];
         }),
       ),
     );
 
     final numClasses = _labels.length;
-    final output = List.generate(1, (_) => List<int>.filled(numClasses, 0));
+    final output =
+        List.generate(1, (_) => List<double>.filled(numClasses, 0.0));
 
     final sw = Stopwatch()..start();
     _interpreter!.run(input, output);
@@ -111,7 +116,7 @@ class OnDeviceFoodService {
       if (scores[i] > scores[best]) best = i;
     }
     final label = _labels[best];
-    final prob = scores[best] / 255.0; // uint8 softmax ≈ olasılık
+    final prob = scores[best]; // fp16 model doğrudan softmax olasılığı verir
     final kcal100 = _calories[label] ?? 0;
 
     return AiEstimate(
@@ -134,7 +139,7 @@ class OnDeviceFoodService {
       return FoodCandidate(
         _prettify(label),
         label,
-        scores[i] / 255.0,
+        scores[i],
         _calories[label] ?? 0,
       );
     }).toList();

@@ -9,7 +9,7 @@ Günlük kalori alımını takip etmek için Flutter ile geliştirilmiş bir And
 - **Günlük takip:** Öğünlere göre (kahvaltı/öğle/akşam/atıştırmalık) gruplama, dairesel ilerleme halkası, hedefe göre kalan/aşan kalori, makro (protein/karb/yağ) toplamları.
 - **AI ile fotoğraftan kalori (3 kaynak — Edge vs Cloud):** Kamerayla çekilen veya galeriden seçilen yemeğin fotoğrafından tahmini kalori; değerleri düzeltip günlüğe ekleme. AI Kam ekranında kaynak seçilebilir:
   - **Bulut (Cloud LLM):** Gemini 2.5 Flash — internet + API anahtarı gerekir, en doğru.
-  - **CNN (Edge CNN):** Kendi eğittiğimiz Food-101 TFLite sınıflandırıcısı (~3.5 MB) — tamamen cihazda, anlık (~100 ms).
+  - **CNN (Edge CNN):** Kendi eğittiğimiz Food-101 TFLite sınıflandırıcısı (fp16, ~6 MB, %66.8 top-1) — tamamen cihazda, anlık.
   - **Gemma (Edge LLM):** Cihaz-içi hat — CNN yemeği tanır, **Gemma 3 1B** (MediaPipe LiteRT) kalori + makroları metin muhakemesiyle üretir. Tamamen offline. Kurulum: [ml/GEMMA_3N_SETUP.md](ml/GEMMA_3N_SETUP.md).
 - **Geçmiş:** Son 7 günün grafiği ve tüm günlerin toplamları.
 - **Yerel saklama:** Veriler cihazda SQLite ile tutulur (hesap/internet gerektirmez; arama ve AI için internet gerekir).
@@ -68,18 +68,21 @@ Gerçek telefonda telefon ve bilgisayar aynı Wi-Fi ağında olmalı; uygulamada
 
 ## On-Device ML — Edge vs Cloud Kıyası
 
-Proje, fotoğraftan kalori tahminini üç farklı yaklaşımla yapabilir ve karşılaştırır:
+Proje, fotoğraftan kalori tahminini üç farklı yaklaşımla yapabilir ve karşılaştırır.
+Doğruluk Food-101 **test** setinde 500 örnekle ölçüldü:
 
-| Kaynak | Tür | Model | Boyut | İnternet | Gecikme (ölçülen) |
-|---|---|---|---|---|---|
-| **Bulut** | Cloud LLM | Gemini 2.5 Flash | — (sunucu) | Gerekir | ~1–3 sn (ağ) |
-| **CNN** | Edge CNN | Food-101 TFLite (kendi eğitimimiz) | ~3.5 MB | Gerekmez | **~94 ms** |
-| **Gemma** | Edge LLM | CNN→Gemma 3 1B (LiteRT) | ~550 MB | Gerekmez | **~13.8 sn** (CPU) |
+| Kaynak | Tür | Model | Top-1 | Top-3 | Kalori MAE | Boyut | İnternet | Gecikme |
+|---|---|---|---|---|---|---|---|---|
+| **Bulut** | Cloud LLM | Gemini 2.5 Flash | serbest | — | — | sunucu | Gerekir | ~1–3 sn |
+| **CNN** | Edge CNN | Food-101 TFLite (fp16) | **%66.8** | **%83.6** | 23.5 kcal/100g | ~6 MB | Hayır | ~0.1 sn |
+| **Gemma** | Edge LLM | CNN→Gemma 3 1B (LiteRT) | ≤ %83.6¹ | — | — | ~550 MB | Hayır | ~13.8 sn |
 
-> Ölçüm: Redmi Note 10S (6 GB RAM), CPU backend. CNN algı 94 ms, Gemma 1B muhakeme ~13.8 sn.
+> ¹ Gemma yemeği CNN'in ilk 3 adayından seçer → tanıma tavanı top-3 (%83.6).
+> Gecikme ölçümü: Redmi Note 10S (6 GB RAM), CPU. Gemma 1B muhakeme ~13.8 sn.
 
 **Bulgular:**
-- **Edge CNN** anlık ve çok hafif; ama sadece 101 sınıf, kaloriyi sabit tablodan eşler, makro üretmez.
+- **Edge CNN (fp16)** anlık, hafif ve **%66.8 top-1** isabetli; ama 101 sınıfla sınırlı, kaloriyi sabit tablodan eşler, makro üretmez.
+- **int8 kuantizasyon tuzağı:** Aynı modelin tam-int8 sürümü (~3.5 MB) MobileNetV3'ün h-swish/SE bloklarından dolayı **%8'e** düştü → bu yüzden uygulama **fp16** (~6 MB, neredeyse kayıpsız) kullanıyor. Edge ML'de gerçek bir boyut↔doğruluk takası.
 - **Edge LLM (Gemma)** offline + gizli (foto cihazdan çıkmaz) + makro üretir; bedeli yüksek gecikme.
 - **Cloud LLM (Gemini)** en doğru ve serbest yemek tanır; ama internet + API kotası + gizlilik (foto buluta gider).
 - **Donanım sınırı:** Gemma 3n E2B (~3 GB, multimodal) 8 GB+ RAM ister; 6 GB cihazda işletim sistemi uygulamayı yükleme anında öldürür (lowmemorykill). Bu yüzden cihaz-içi LLM olarak **CNN algı + Gemma 1B muhakeme** hattı tercih edildi.

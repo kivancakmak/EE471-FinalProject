@@ -73,16 +73,19 @@ kontrol eder ve net bir uyarı verir.
 
 Redmi Note 10S (6 GB RAM), CPU backend:
 
-| Metrik | Gemini (Cloud) | TFLite CNN (Edge) | CNN→Gemma 1B (Edge LLM) |
+| Metrik | Gemini (Cloud) | TFLite CNN (Edge, fp16) | CNN→Gemma 1B (Edge LLM) |
 |---|---|---|---|
-| Gecikme | ~1–3 sn (ağ) | **~94 ms** | **~13.8 sn** (94 ms + 13.7 sn) |
-| Model boyutu | — | ~3.5 MB | ~550 MB |
+| Top-1 doğruluk | serbest | **%66.8** | ≤ %83.6 (top-3 tavanı) |
+| Gecikme | ~1–3 sn (ağ) | **~0.1 sn** | **~13.8 sn** |
+| Model boyutu | — | ~6 MB (fp16) | ~550 MB |
 | Offline | ✗ | ✓ | ✓ |
 | Gizlilik (foto cihazda) | ✗ | ✓ | ✓ |
 | Makro üretir | ✓ | ✗ | ✓ |
 | Yemek kapsamı | serbest | 101 sınıf | 101 sınıf (CNN) + LLM bilgisi |
 | Maliyet | API kotası | yok | yok |
 | Min. donanım | düşük | orta | 4 GB+ RAM |
+
+> int8 sürümü MobileNetV3'te %8'e düştüğü için fp16 tercih edildi (bkz. ana README).
 
 > Doğruluk kıyası için Food-101 test setinden örneklerle `evaluate_vs_gemini.py`
 > kullanılabilir (Faz 3).
